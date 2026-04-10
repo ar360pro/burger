@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>AR Menu Experience</title>
+
+  <!-- Google Model Viewer -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+  <!-- Three.js (Mind-AR dependency) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+  <!-- Mind-AR Image Tracking -->
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --gold:       #d4a853;
+      --gold-light: #f0c878;
+      --charcoal:   #141210;
+      --surface:    #1e1a16;
+      --glass:      rgba(20, 18, 16, 0.72);
+      --glass-edge: rgba(212, 168, 83, 0.22);
+      --text:       #f0ece4;
+      --muted:      #8a7d6a;
+      --danger:     #e05252;
+      --radius-pill: 60px;
+      --radius-card: 20px;
+      --sans:       'DM Sans', sans-serif;
+      --serif:      'Cormorant Garamond', Georgia, serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--charcoal);
+      font-family: var(--sans);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Loading Screen ───────────────────────────────────── */
+    #boot-screen {
+      position: fixed; inset: 0;
+      z-index: 9999;
+      background: var(--charcoal);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      transition: opacity 0.5s ease;
+    }
+
+    #boot-screen.fade-out { opacity: 0; pointer-events: none; }
+
+    .boot-logo {
+      font-family: var(--serif);
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--gold);
+      letter-spacing: 0.06em;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .boot-spinner {
+      width: 36px; height: 36px;
+      border: 3px solid rgba(212,168,83,0.2);
+      border-top-color: var(--gold);
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+
+    .boot-msg {
+      font-size: 13px;
+      font-weight: 300;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Error Screen ─────────────────────────────────────── */
+    #error-screen {
+      position: fixed; inset: 0;
+      z-index: 9998;
+      display: none;
+      background: var(--charcoal);
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      text-align: center;
+    }
+
+    #error-screen .err-icon { font-size: 48px; margin-bottom: 16px; }
+    #error-screen h2 {
+      font-family: var(--serif);
+      font-size: 22px;
+      color: var(--text);
+      margin-bottom: 10px;
+    }
+    #error-screen p { font-size: 14px; color: var(--muted); line-height: 1.6; }
+    #error-screen .err-hint {
+      margin-top: 20px;
+      padding: 14px 20px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--glass-edge);
+      border-radius: 14px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.7;
+      text-align: left;
+    }
+    #error-screen .err-hint code {
+      color: var(--gold-light);
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    /* ── Viewer Section ───────────────────────────────────── */
+    #viewer-section {
+      position: fixed; inset: 0;
+      display: flex;
+      flex-direction: column;
+      transition: opacity 0.4s ease;
+    }
+
+    model-viewer {
+      width: 100vw; height: 100vh;
+      display: block;
+      background-color: var(--charcoal);
+      --progress-bar-color: var(--gold);
+    }
+
+    model-viewer::part(default-ar-button),
+    [slot="ar-button"] { display: none !important; }
+
+    /* Grain overlay */
+    #viewer-section::after {
+      content: '';
+      position: absolute; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.6;
+    }
+
+    /* ── Header ───────────────────────────────────────────── */
+    #header {
+      position: absolute; top: 0; left: 0; right: 0;
+      z-index: 10;
+      padding: 20px 24px 16px;
+      background: linear-gradient(to bottom, rgba(14,12,10,0.88) 0%, transparent 100%);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-dot {
+      width: 10px; height: 10px;
+      background: var(--gold);
+      border-radius: 50%;
+      box-shadow: 0 0 12px var(--gold);
+      flex-shrink: 0;
+    }
+
+    #header h1 {
+      font-family: var(--serif);
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    #header p {
+      font-size: 11px;
+      font-weight: 300;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+
+    /* ── Model name badge (shows auto-detected filename) ─── */
+    #model-name-badge {
+      position: absolute;
+      top: 72px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: var(--glass);
+      border: 1px solid var(--glass-edge);
+      border-radius: 20px;
+      padding: 5px 14px;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--muted);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      white-space: nowrap;
+      max-width: 80vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: none; /* shown after load */
+    }
+
+    /* ── Compat notice ────────────────────────────────────── */
+    #compat-notice {
+      display: none;
+      position: absolute;
+      bottom: 185px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: rgba(224, 82, 82, 0.15);
+      border: 1px solid rgba(224, 82, 82, 0.4);
+      border-radius: 10px;
+      padding: 9px 16px;
+      font-size: 12px;
+      color: #f08080;
+      text-align: center;
+      white-space: nowrap;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    /* ── Bottom UI panel ──────────────────────────────────── */
+    #ui-panel {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      z-index: 10;
+      padding: 24px 20px 40px;
+      background: linear-gradient(to top, rgba(14,12,10,0.95) 60%, transparent 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .panel-label {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+      max-width: 440px;
+    }
+
+    .ar-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 16px 10px;
+      border: none;
+      border-radius: var(--radius-card);
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+      -webkit-tap-highlight-color: transparent;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .ar-btn::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.07) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .ar-btn:active { transform: scale(0.96); }
+
+    .btn-icon  { font-size: 26px; line-height: 1; }
+    .btn-title { font-size: 13px; font-weight: 500; line-height: 1.2; text-align: center; }
+    .btn-sub   { font-size: 10px; font-weight: 300; opacity: 0.65; text-align: center; }
+
+    #btn-surface {
+      background: linear-gradient(140deg, #a07830 0%, #d4a853 50%, #c49040 100%);
+      color: #1a1200;
+      box-shadow: 0 6px 24px rgba(212, 168, 83, 0.35);
+    }
+    #btn-surface:hover { box-shadow: 0 10px 32px rgba(212,168,83,0.5); transform: translateY(-1px); }
+
+    #btn-scan {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid var(--glass-edge);
+      color: var(--text);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    #btn-scan:hover { background: rgba(255,255,255,0.13); }
+    #btn-scan.highlighted {
+      border-color: rgba(212,168,83,0.6);
+      background: rgba(212,168,83,0.12);
+      box-shadow: 0 4px 20px rgba(212,168,83,0.2);
+    }
+    #btn-scan.highlighted .btn-title { color: var(--gold-light); }
+
+    /* ── Mind-AR Section ──────────────────────────────────── */
+    #mindar-section {
+      position: fixed; inset: 0;
+      display: none;
+      z-index: 200;
+      background: #000;
+    }
+
+    #mindar-section video,
+    #mindar-section canvas {
+      position: absolute !important;
+      top: 0 !important; left: 0 !important;
+      width: 100% !important; height: 100% !important;
+      object-fit: cover !important;
+    }
+
+    #mindar-overlay {
+      position: absolute; inset: 0;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 48px 24px 52px;
+    }
+
+    #mindar-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      pointer-events: auto;
+    }
+
+    #close-mindar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--glass);
+      border: 1px solid var(--glass-edge);
+      border-radius: var(--radius-pill);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 10px 20px 10px 14px;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      transition: background 0.2s, transform 0.15s;
+    }
+    #close-mindar:active { transform: scale(0.95); }
+
+    #mindar-badge {
+      background: var(--glass);
+      border: 1px solid var(--glass-edge);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 11px;
+      color: var(--muted);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    #scan-hint { pointer-events: none; text-align: center; }
+
+    #scan-hint .hint-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--glass);
+      border: 1px solid var(--glass-edge);
+      border-radius: var(--radius-pill);
+      padding: 12px 22px;
+      font-size: 13px;
+      color: var(--text);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+    }
+
+    @keyframes pulse-ring {
+      0%   { transform: scale(0.9); opacity: 0.7; }
+      70%  { transform: scale(1.1); opacity: 0.2; }
+      100% { transform: scale(0.9); opacity: 0.7; }
+    }
+
+    .scan-ring {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 2px solid var(--gold);
+      animation: pulse-ring 1.8s ease-in-out infinite;
+    }
+
+    #mindar-loading {
+      position: absolute; inset: 0;
+      z-index: 20;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: rgba(14,12,10,0.92);
+    }
+
+    #mindar-loading p { font-size: 14px; color: var(--muted); font-weight: 300; letter-spacing: 0.04em; }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- ══ Boot Loading Screen ══════════════════════════════════ -->
+  <div id="boot-screen">
+    <div class="boot-logo">✦ AR Menu</div>
+    <div class="boot-spinner"></div>
+    <p class="boot-msg" id="boot-msg">Model files dhoondh rahe hain…</p>
+  </div>
+
+  <!-- ══ Error Screen (shown if no model found) ══════════════ -->
+  <div id="error-screen">
+    <div>
+      <div class="err-icon">📂</div>
+      <h2>Model File Nahi Mila</h2>
+      <p>Is folder mein koi <strong>.glb</strong> file nahi mili.<br/>Apni model file isi folder mein rakhein.</p>
+      <div class="err-hint">
+        <strong style="color:var(--text);">Kya karna hai:</strong><br/>
+        1. Apni model file (<code>kuch_bhi.glb</code>) isi folder mein copy karein<br/>
+        2. Agar iOS support chahiye toh <code>kuch_bhi.usdz</code> bhi rakhein<br/>
+        3. Page refresh karein — automatically detect ho jayega ✓
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 3D Viewer Section ═══════════════════════════════════ -->
+  <div id="viewer-section" style="display:none;">
+
+    <div id="header">
+      <div class="logo-dot"></div>
+      <div>
+        <h1>AR Menu</h1>
+        <p>Interactive Experience</p>
+      </div>
+    </div>
+
+    <!-- Auto-detected filename badge -->
+    <div id="model-name-badge"></div>
+
+    <model-viewer
+      id="ar-viewer"
+      src=""
+      alt="Restaurant dish 3D model"
+      ar
+      ar-modes="webxr scene-viewer quick-look"
+      ar-placement="floor"
+      ar-scale="fixed"
+      scale="0.01 0.01 0.01"
+      bounds="tight"
+      camera-controls
+      touch-action="none"
+      enable-pan
+      auto-rotate
+      auto-rotate-delay="1500"
+      shadow-intensity="1"
+      shadow-softness="0.75"
+      environment-image="neutral"
+      exposure="1.1"
+      loading="eager"
+    >
+      <button slot="ar-button" style="display:none;" aria-hidden="true"></button>
+    </model-viewer>
+
+    <div id="compat-notice">⚡ Aapka device Universal Mode use kar raha hai AR ke liye.</div>
+
+    <div id="ui-panel">
+      <span class="panel-label">Choose your AR experience</span>
+      <div class="btn-row">
+        <button class="ar-btn" id="btn-surface" aria-label="View on Table">
+          <span class="btn-icon">✦</span>
+          <span class="btn-title">View on Table</span>
+          <span class="btn-sub">Best Quality</span>
+        </button>
+        <button class="ar-btn" id="btn-scan" aria-label="Scan Menu Card">
+          <span class="btn-icon">⊡</span>
+          <span class="btn-title">Scan Menu Card</span>
+          <span class="btn-sub">Universal Mode</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Mind-AR Section ════════════════════════════════════ -->
+  <div id="mindar-section">
+    <div id="mindar-loading">
+      <div class="boot-spinner"></div>
+      <p>Camera shuru ho rahi hai…</p>
+    </div>
+    <div id="mindar-container"></div>
+    <div id="mindar-overlay">
+      <div id="mindar-top">
+        <button id="close-mindar">
+          <span style="font-size:16px;opacity:0.75;">✕</span> Band Karo
+        </button>
+        <div id="mindar-badge">Universal Mode</div>
+      </div>
+      <div id="scan-hint">
+        <span class="hint-pill">
+          <span class="scan-ring"></span>
+          Menu card par camera point karein
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    /* ── Refs ───────────────────────────────────────────────── */
+    const bootScreen     = document.getElementById('boot-screen');
+    const bootMsg        = document.getElementById('boot-msg');
+    const errorScreen    = document.getElementById('error-screen');
+    const viewerSection  = document.getElementById('viewer-section');
+    const modelViewer    = document.getElementById('ar-viewer');
+    const modelBadge     = document.getElementById('model-name-badge');
+    const compatNotice   = document.getElementById('compat-notice');
+    const btnSurface     = document.getElementById('btn-surface');
+    const btnScan        = document.getElementById('btn-scan');
+    const mindarSection  = document.getElementById('mindar-section');
+    const mindarLoading  = document.getElementById('mindar-loading');
+    const mindarContainer= document.getElementById('mindar-container');
+    const closeMindarBtn = document.getElementById('close-mindar');
+
+    let mindarSession  = null;
+    let detectedGlb    = null;
+    let detectedUsdz   = null;
+
+    /* ════════════════════════════════════════════════════════
+       STEP 1 — AUTO-DETECT MODEL FILES via manifest.php
+       Agar PHP available nahi (static host), fallback logic
+       bhi hai jo common names try karta hai.
+    ════════════════════════════════════════════════════════ */
+    async function detectModelFiles() {
+      bootMsg.textContent = 'Model files dhoondh rahe hain…';
+
+      // ── Try manifest.php first ──
+      try {
+        const res = await fetch('manifest.php?t=' + Date.now());
+        if (res.ok) {
+          const data = await res.json();
+          if (data.glb) {
+            detectedGlb  = data.glb;
+            detectedUsdz = data.usdz || null;
+            return true;
+          }
+        }
+      } catch (_) { /* PHP not available, try fallback */ }
+
+      // ── Fallback: try a manifest.json (can be generated by Node.js) ──
+      try {
+        const res = await fetch('manifest.json?t=' + Date.now());
+        if (res.ok) {
+          const data = await res.json();
+          if (data.glb) {
+            detectedGlb  = data.glb;
+            detectedUsdz = data.usdz || null;
+            return true;
+          }
+        }
+      } catch (_) { /* not available */ }
+
+      // ── Last resort: probe common filenames via HEAD requests ──
+      bootMsg.textContent = 'Common filenames check kar rahe hain…';
+      const commonNames = [
+        'model', 'scene', 'object', 'item', 'dish',
+        'food', 'product', 'ar-model', 'ar_model', 'mesh'
+      ];
+
+      for (const name of commonNames) {
+        try {
+          const r = await fetch(name + '.glb', { method: 'HEAD' });
+          if (r.ok) {
+            detectedGlb = name + '.glb';
+            // Check for matching usdz
+            try {
+              const ru = await fetch(name + '.usdz', { method: 'HEAD' });
+              if (ru.ok) detectedUsdz = name + '.usdz';
+            } catch(_) {}
+            return true;
+          }
+        } catch(_) {}
+      }
+
+      return false; // nothing found
+    }
+
+    /* ════════════════════════════════════════════════════════
+       STEP 2 — INIT VIEWER once files are detected
+    ════════════════════════════════════════════════════════ */
+    async function initViewer() {
+      const found = await detectModelFiles();
+
+      if (!found) {
+        // Show error screen
+        bootScreen.classList.add('fade-out');
+        setTimeout(() => {
+          bootScreen.style.display = 'none';
+          errorScreen.style.display = 'flex';
+        }, 500);
+        return;
+      }
+
+      // Inject detected paths into model-viewer
+      modelViewer.setAttribute('src', detectedGlb);
+      if (detectedUsdz) {
+        modelViewer.setAttribute('ios-src', detectedUsdz);
+      }
+
+      // Show filename badge
+      const usdzInfo = detectedUsdz ? ` • ${detectedUsdz}` : ' • (iOS USDZ nahi mila)';
+      modelBadge.textContent = `📦 ${detectedGlb}${usdzInfo}`;
+      modelBadge.style.display = 'block';
+
+      // Show viewer section, hide boot screen
+      viewerSection.style.display = 'flex';
+      bootMsg.textContent = 'Model load ho raha hai…';
+
+      // Wait for model-viewer to load the model
+      modelViewer.addEventListener('load', function onLoad() {
+        modelViewer.removeEventListener('load', onLoad);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          bootScreen.classList.add('fade-out');
+          setTimeout(() => { bootScreen.style.display = 'none'; }, 500);
+          checkARCapability();
+        }));
+      });
+
+      // If somehow already loaded
+      if (modelViewer.loaded) {
+        bootScreen.classList.add('fade-out');
+        setTimeout(() => { bootScreen.style.display = 'none'; }, 500);
+        checkARCapability();
+      }
+    }
+
+    /* ════════════════════════════════════════════════════════
+       STEP 3 — AR CAPABILITY CHECK
+    ════════════════════════════════════════════════════════ */
+    function checkARCapability() {
+      if (!modelViewer.canActivateAR) {
+        btnSurface.style.opacity     = '0.45';
+        btnSurface.style.pointerEvents = 'none';
+        btnScan.classList.add('highlighted');
+        compatNotice.style.display   = 'block';
+      }
+    }
+
+    /* ════════════════════════════════════════════════════════
+       BUTTON A — SURFACE / NATIVE AR
+    ════════════════════════════════════════════════════════ */
+    btnSurface.addEventListener('click', () => {
+      if (modelViewer.canActivateAR) modelViewer.activateAR();
+    });
+
+    modelViewer.addEventListener('ar-status', (e) => {
+      if (e.detail.status === 'session-started') {
+        btnSurface.style.opacity = '0.4';
+      } else {
+        if (modelViewer.canActivateAR) btnSurface.style.opacity = '1';
+      }
+    });
+
+    /* ════════════════════════════════════════════════════════
+       BUTTON B — MIND-AR IMAGE TRACKING
+    ════════════════════════════════════════════════════════ */
+    btnScan.addEventListener('click', startMindAR);
+
+    async function startMindAR() {
+      viewerSection.style.opacity      = '0';
+      viewerSection.style.pointerEvents = 'none';
+      mindarSection.style.display       = 'block';
+      mindarLoading.classList.remove('hidden');
+
+      try {
+        if (mindarSession) {
+          try { await mindarSession.stop(); } catch(_) {}
+          mindarContainer.innerHTML = '';
+          mindarSession = null;
+        }
+
+        const scene  = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(
+          60, window.innerWidth / window.innerHeight, 0.1, 100
+        );
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+        const dir = new THREE.DirectionalLight(0xfff4e0, 1.2);
+        dir.position.set(2, 4, 3);
+        scene.add(dir);
+
+        const { MindARThree } = window.MINDAR.IMAGE;
+        const mindarThree = new MindARThree({
+          container: mindarContainer,
+          imageTargetSrc: 'target.mind',
+          maxTrack: 1,
+        });
+
+        mindarSession = mindarThree;
+        await mindarThree.start();
+
+        const anchor     = mindarThree.addAnchor(0);
+        const modelGroup = new THREE.Group();
+        anchor.group.add(modelGroup);
+
+        // Use auto-detected GLB file
+        if (typeof THREE.GLTFLoader !== 'undefined') {
+          const gltfLoader = new THREE.GLTFLoader();
+          gltfLoader.load(
+            detectedGlb,                            // ← auto-detected filename
+            (gltf) => {
+              const m = gltf.scene;
+              m.scale.set(0.08, 0.08, 0.08);
+              modelGroup.add(m);
+            },
+            undefined,
+            (err) => console.warn('GLB load error:', err)
+          );
+        } else {
+          // Visible placeholder if GLTFLoader not bundled
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.15, 0.15, 0.15),
+            new THREE.MeshStandardMaterial({ color: 0xd4a853, metalness: 0.6, roughness: 0.3 })
+          );
+          modelGroup.add(mesh);
+        }
+
+        mindarThree.renderer.setAnimationLoop(() => {
+          mindarThree.updateRenderTarget();
+          mindarThree.renderer.render(mindarThree.scene, mindarThree.camera);
+        });
+
+        mindarLoading.classList.add('hidden');
+
+        anchor.onTargetFound = () => { document.getElementById('scan-hint').style.display = 'none'; };
+        anchor.onTargetLost  = () => { document.getElementById('scan-hint').style.display = 'flex'; };
+
+      } catch (err) {
+        console.error('Mind-AR error:', err);
+        mindarLoading.innerHTML = `
+          <div style="text-align:center;padding:24px;color:#f08080;">
+            <div style="font-size:32px;margin-bottom:12px;">⚠️</div>
+            <p style="font-size:14px;color:#f0ece4;margin-bottom:8px;">Camera access chahiye</p>
+            <p style="font-size:12px;color:#8a7d6a;">${err.message || 'AR session shuru nahi hui.'}</p>
+          </div>`;
+        setTimeout(stopMindAR, 3500);
+      }
+    }
+
+    /* ════════════════════════════════════════════════════════
+       CLOSE MIND-AR
+    ════════════════════════════════════════════════════════ */
+    closeMindarBtn.addEventListener('click', stopMindAR);
+
+    async function stopMindAR() {
+      if (mindarSession) {
+        try { await mindarSession.stop(); } catch(_) {}
+        mindarSession = null;
+      }
+      mindarContainer.innerHTML = '';
+      mindarLoading.classList.remove('hidden');
+      document.getElementById('scan-hint').style.display = 'flex';
+      mindarSection.style.display       = 'none';
+      viewerSection.style.opacity       = '1';
+      viewerSection.style.pointerEvents = 'auto';
+    }
+
+    /* ════════════════════════════════════════════════════════
+       KICK OFF
+    ════════════════════════════════════════════════════════ */
+    initViewer();
+
+  })();
+  </script>
+
+</body>
+</html>
